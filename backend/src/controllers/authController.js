@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const { User } = require('../models');
 const logger = require('../utils/logger');
 
 // Generate JWT Token
@@ -17,7 +17,7 @@ exports.register = async (req, res) => {
     const { firstName, lastName, email, password, role } = req.body;
 
     // Check if user exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       logger.warn(`Registration attempt with existing email: ${email}`);
       return res.status(400).json({ 
@@ -36,7 +36,7 @@ exports.register = async (req, res) => {
     });
 
     // Generate token
-    const token = generateToken(user._id);
+    const token = generateToken(user.id);
 
     logger.info(`New user registered: ${user.email}`);
 
@@ -45,7 +45,7 @@ exports.register = async (req, res) => {
       message: 'User registered successfully',
       data: {
         user: {
-          id: user._id,
+          id: user.id,
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
@@ -56,6 +56,17 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Registration error: ${error.message}`, { stack: error.stack });
+    
+    // Handle validation errors
+    if (error.name === 'SequelizeValidationError') {
+      const messages = error.errors.map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+    
     res.status(500).json({ 
       success: false, 
       message: 'Server error during registration' 
@@ -71,7 +82,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     // Find user
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ where: { email } });
     if (!user) {
       logger.warn(`Login attempt with non-existent email: ${email}`);
       return res.status(401).json({ 
@@ -100,7 +111,7 @@ exports.login = async (req, res) => {
     }
 
     // Generate token
-    const token = generateToken(user._id);
+    const token = generateToken(user.id);
 
     logger.info(`User logged in: ${user.email}`);
 
@@ -109,7 +120,7 @@ exports.login = async (req, res) => {
       message: 'Login successful',
       data: {
         user: {
-          id: user._id,
+          id: user.id,
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
@@ -132,7 +143,9 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
+    const user = await User.findByPk(req.user.id, {
+      attributes: { exclude: ['password'] }
+    });
     
     res.json({
       success: true,

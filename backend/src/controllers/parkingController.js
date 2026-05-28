@@ -1,4 +1,5 @@
-const Parking = require('../models/Parking');
+const { Parking, ParkingEntry } = require('../models');
+const { Op } = require('sequelize');
 const logger = require('../utils/logger');
 
 // @desc    Create new parking
@@ -9,7 +10,7 @@ exports.createParking = async (req, res) => {
     const { code, name, totalSpaces, location, feePerHour } = req.body;
 
     // Check if parking code already exists
-    const existingParking = await Parking.findOne({ code });
+    const existingParking = await Parking.findOne({ where: { code } });
     if (existingParking) {
       logger.warn(`Create parking attempt with existing code: ${code}`);
       return res.status(400).json({ 
@@ -36,6 +37,16 @@ exports.createParking = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Create parking error: ${error.message}`, { stack: error.stack });
+    
+    if (error.name === 'SequelizeValidationError') {
+      const messages = error.errors.map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+    
     res.status(500).json({ 
       success: false, 
       message: 'Server error creating parking' 
@@ -50,22 +61,24 @@ exports.getParkings = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
     const query = { isActive: true };
     
     // Search by location or name
     if (req.query.search) {
-      query.$or = [
-        { name: { $regex: req.query.search, $options: 'i' } },
-        { location: { $regex: req.query.search, $options: 'i' } }
+      query[Op.or] = [
+        { name: { [Op.iLike]: `%${req.query.search}%` } },
+        { location: { [Op.iLike]: `%${req.query.search}%` } }
       ];
     }
 
-    const [parkings, total] = await Promise.all([
-      Parking.find(query).skip(skip).limit(limit).sort({ createdAt: -1 }),
-      Parking.countDocuments(query)
-    ]);
+    const { count, rows: parkings } = await Parking.findAndCountAll({
+      where: query,
+      limit,
+      offset,
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json({
       success: true,
@@ -73,10 +86,10 @@ exports.getParkings = async (req, res) => {
         parkings,
         pagination: {
           currentPage: page,
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
+          totalPages: Math.ceil(count / limit),
+          totalItems: count,
           itemsPerPage: limit,
-          hasNextPage: page * limit < total,
+          hasNextPage: page * limit < count,
           hasPrevPage: page > 1
         }
       }
@@ -95,7 +108,7 @@ exports.getParkings = async (req, res) => {
 // @access  Public
 exports.getParkingByCode = async (req, res) => {
   try {
-    const parking = await Parking.findOne({ code: req.params.code });
+    const parking = await Parking.findOne({ where: { code: req.params.code } });
     
     if (!parking) {
       return res.status(404).json({ 
@@ -124,18 +137,22 @@ exports.updateParking = async (req, res) => {
   try {
     const { name, totalSpaces, location, feePerHour, isActive } = req.body;
 
-    const parking = await Parking.findOneAndUpdate(
-      { code: req.params.code },
-      { name, totalSpaces, location, feePerHour, isActive },
-      { new: true, runValidators: true }
-    );
-
+    const parking = await Parking.findOne({ where: { code: req.params.code } });
+    
     if (!parking) {
       return res.status(404).json({ 
         success: false, 
         message: 'Parking not found' 
       });
     }
+
+    await parking.update({
+      name,
+      totalSpaces,
+      location,
+      feePerHour,
+      isActive
+    });
 
     logger.info(`Parking updated: ${parking.code}`);
 
@@ -146,6 +163,16 @@ exports.updateParking = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Update parking error: ${error.message}`, { stack: error.stack });
+    
+    if (error.name === 'SequelizeValidationError') {
+      const messages = error.errors.map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+    
     res.status(500).json({ 
       success: false, 
       message: 'Server error updating parking' 
@@ -158,7 +185,7 @@ exports.updateParking = async (req, res) => {
 // @access  Private/Admin
 exports.deleteParking = async (req, res) => {
   try {
-    const parking = await Parking.findOneAndDelete({ code: req.params.code });
+    const parking = await Parking.findOne({ where: { code: req.params.code } });
 
     if (!parking) {
       return res.status(404).json({ 
@@ -166,6 +193,8 @@ exports.deleteParking = async (req, res) => {
         message: 'Parking not found' 
       });
     }
+
+    await parking.destroy();
 
     logger.info(`Parking deleted: ${parking.code}`);
 

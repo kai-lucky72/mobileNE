@@ -1,51 +1,67 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-const parkingSchema = new mongoose.Schema({
+const Parking = sequelize.define('Parking', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
   code: {
-    type: String,
-    required: [true, 'Parking code is required'],
+    type: DataTypes.STRING,
+    allowNull: false,
     unique: true,
-    uppercase: true,
-    trim: true
+    validate: {
+      notEmpty: true
+    }
   },
   name: {
-    type: String,
-    required: [true, 'Parking name is required'],
-    trim: true
+    type: DataTypes.STRING,
+    allowNull: false,
+    validate: {
+      notEmpty: true
+    }
   },
   totalSpaces: {
-    type: Number,
-    required: [true, 'Number of spaces is required'],
-    min: [1, 'Must have at least 1 space']
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    validate: {
+      min: 1
+    }
   },
   availableSpaces: {
-    type: Number,
-    required: true
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0
   },
   location: {
-    type: String,
-    required: [true, 'Location is required'],
-    trim: true
+    type: DataTypes.STRING,
+    allowNull: false,
+    validate: {
+      notEmpty: true
+    }
   },
   feePerHour: {
-    type: Number,
-    required: [true, 'Fee per hour is required'],
-    min: [0, 'Fee cannot be negative']
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+    validate: {
+      min: 0
+    }
   },
   isActive: {
-    type: Boolean,
-    default: true
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
   }
 }, {
-  timestamps: true
-});
-
-// Update available spaces before saving
-parkingSchema.pre('save', function(next) {
-  if (this.isNew) {
-    this.availableSpaces = this.totalSpaces;
+  timestamps: true,
+  tableName: 'parkings',
+  hooks: {
+    beforeCreate: (parking) => {
+      if (!parking.availableSpaces) {
+        parking.availableSpaces = parking.totalSpaces;
+      }
+    }
   }
-  next();
 });
 
-module.exports = mongoose.model('Parking', parkingSchema);
+module.exports = Parking;

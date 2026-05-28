@@ -1,5 +1,5 @@
-const ParkingEntry = require('../models/ParkingEntry');
-const Parking = require('../models/Parking');
+const { ParkingEntry, Parking } = require('../models');
+const { Op } = require('sequelize');
 const logger = require('../utils/logger');
 
 // @desc    Register car entry
@@ -10,7 +10,7 @@ exports.createEntry = async (req, res) => {
     const { plateNumber, parkingCode } = req.body;
 
     // Check if parking exists and has available spaces
-    const parking = await Parking.findOne({ code: parkingCode });
+    const parking = await Parking.findOne({ where: { code: parkingCode } });
     
     if (!parking) {
       return res.status(404).json({ 
@@ -28,9 +28,11 @@ exports.createEntry = async (req, res) => {
 
     // Check if there's already an active entry for this plate number in this parking
     const existingActiveEntry = await ParkingEntry.findOne({
-      plateNumber,
-      parkingCode,
-      status: 'active'
+      where: {
+        plateNumber,
+        parkingCode,
+        status: 'active'
+      }
     });
 
     if (existingActiveEntry) {
@@ -70,6 +72,16 @@ exports.createEntry = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Create entry error: ${error.message}`, { stack: error.stack });
+    
+    if (error.name === 'SequelizeValidationError') {
+      const messages = error.errors.map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+    
     res.status(500).json({ 
       success: false, 
       message: 'Server error registering entry' 
@@ -86,10 +98,12 @@ exports.processExit = async (req, res) => {
 
     // Find active entry
     const entry = await ParkingEntry.findOne({
-      plateNumber,
-      parkingCode,
-      status: 'active'
-    }).populate('parkingCode');
+      where: {
+        plateNumber,
+        parkingCode,
+        status: 'active'
+      }
+    });
 
     if (!entry) {
       return res.status(404).json({ 
@@ -98,21 +112,22 @@ exports.processExit = async (req, res) => {
       });
     }
 
-    const parking = await Parking.findOne({ code: parkingCode });
+    const parking = await Parking.findOne({ where: { code: parkingCode } });
     
     // Calculate duration and charge
     const exitDateTime = new Date();
     const entryDateTime = new Date(entry.entryDateTime);
     const durationMs = exitDateTime - entryDateTime;
     const durationHours = Math.ceil(durationMs / (1000 * 60 * 60)); // Round up to nearest hour
-    const chargedAmount = durationHours * parking.feePerHour;
+    const chargedAmount = durationHours * parseFloat(parking.feePerHour);
 
     // Update entry
-    entry.exitDateTime = exitDateTime;
-    entry.chargedAmount = chargedAmount;
-    entry.duration = durationHours;
-    entry.status = 'completed';
-    await entry.save();
+    await entry.update({
+      exitDateTime,
+      chargedAmount,
+      duration: durationHours,
+      status: 'completed'
+    });
 
     // Update available spaces
     parking.availableSpaces += 1;
@@ -153,7 +168,7 @@ exports.getEntries = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
     const query = {};
 
@@ -170,24 +185,27 @@ exports.getEntries = async (req, res) => {
     // Filter by date range
     if (req.query.startDate && req.query.endDate) {
       query.entryDateTime = {
-        $gte: new Date(req.query.startDate),
-        $lte: new Date(req.query.endDate)
+        [Op.gte]: new Date(req.query.startDate),
+        [Op.lte]: new Date(req.query.endDate)
       };
     }
 
     // Search by plate number
     if (req.query.plateNumber) {
-      query.plateNumber = { $regex: req.query.plateNumber, $options: 'i' };
+      query.plateNumber = { [Op.iLike]: `%${req.query.plateNumber}%` };
     }
 
-    const [entries, total] = await Promise.all([
-      ParkingEntry.find(query)
-        .skip(skip)
-        .limit(limit)
-        .sort({ createdAt: -1 })
-        .populate('parkingCode', 'name code location'),
-      ParkingEntry.countDocuments(query)
-    ]);
+    const { count, rows: entries } = await ParkingEntry.findAndCountAll({
+      where: query,
+      limit,
+      offset,
+      order: [['createdAt', 'DESC']],
+      include: [{
+        model: Parking,
+        as: 'parking',
+        attributes: ['name', 'code', 'location']
+      }]
+    });
 
     res.json({
       success: true,
@@ -195,10 +213,10 @@ exports.getEntries = async (req, res) => {
         entries,
         pagination: {
           currentPage: page,
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
+          totalPages: Math.ceil(count / limit),
+          totalItems: count,
           itemsPerPage: limit,
-          hasNextPage: page * limit < total,
+          hasNextPage: page * limit < count,
           hasPrevPage: page > 1
         }
       }
@@ -218,8 +236,13 @@ exports.getEntries = async (req, res) => {
 exports.getEntryByTicket = async (req, res) => {
   try {
     const entry = await ParkingEntry.findOne({ 
-      ticketNumber: req.params.ticketNumber 
-    }).populate('parkingCode', 'name code location feePerHour');
+      where: { ticketNumber: req.params.ticketNumber },
+      include: [{
+        model: Parking,
+        as: 'parking',
+        attributes: ['name', 'code', 'location', 'feePerHour']
+      }]
+    });
 
     if (!entry) {
       return res.status(404).json({ 
@@ -258,8 +281,8 @@ exports.getOutgoingReport = async (req, res) => {
     const query = {
       status: 'completed',
       exitDateTime: {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
+        [Op.gte]: new Date(startDate),
+        [Op.lte]: new Date(endDate)
       }
     };
 
@@ -267,11 +290,17 @@ exports.getOutgoingReport = async (req, res) => {
       query.parkingCode = parkingCode;
     }
 
-    const entries = await ParkingEntry.find(query)
-      .populate('parkingCode', 'name code location')
-      .sort({ exitDateTime: -1 });
+    const { rows: entries } = await ParkingEntry.findAndCountAll({
+      where: query,
+      order: [['exitDateTime', 'DESC']],
+      include: [{
+        model: Parking,
+        as: 'parking',
+        attributes: ['name', 'code', 'location']
+      }]
+    });
 
-    const totalAmount = entries.reduce((sum, entry) => sum + entry.chargedAmount, 0);
+    const totalAmount = entries.reduce((sum, entry) => sum + parseFloat(entry.chargedAmount), 0);
 
     res.json({
       success: true,
@@ -309,8 +338,8 @@ exports.getEnteredReport = async (req, res) => {
 
     const query = {
       entryDateTime: {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
+        [Op.gte]: new Date(startDate),
+        [Op.lte]: new Date(endDate)
       }
     };
 
@@ -318,9 +347,15 @@ exports.getEnteredReport = async (req, res) => {
       query.parkingCode = parkingCode;
     }
 
-    const entries = await ParkingEntry.find(query)
-      .populate('parkingCode', 'name code location')
-      .sort({ entryDateTime: -1 });
+    const { rows: entries } = await ParkingEntry.findAndCountAll({
+      where: query,
+      order: [['entryDateTime', 'DESC']],
+      include: [{
+        model: Parking,
+        as: 'parking',
+        attributes: ['name', 'code', 'location']
+      }]
+    });
 
     res.json({
       success: true,
