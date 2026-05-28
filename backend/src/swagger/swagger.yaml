@@ -1,0 +1,292 @@
+openapi: 3.0.0
+info:
+  title: XWZ Parking Management System API
+  description: API documentation for XWZ LTD Parking Management System
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000/api
+    description: Development server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        role:
+          type: string
+          enum: [admin, parking_attendant, user]
+
+    Parking:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        totalSpaces:
+          type: integer
+        availableSpaces:
+          type: integer
+        location:
+          type: string
+        feePerHour:
+          type: number
+
+    ParkingEntry:
+      type: object
+      properties:
+        plateNumber:
+          type: string
+        parkingCode:
+          type: string
+        entryDateTime:
+          type: string
+          format: date-time
+        exitDateTime:
+          type: string
+          format: date-time
+        chargedAmount:
+          type: number
+        ticketNumber:
+          type: string
+        status:
+          type: string
+          enum: [active, completed]
+
+paths:
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                role:
+                  type: string
+      responses:
+        201:
+          description: User registered successfully
+        400:
+          description: Validation error or user exists
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        200:
+          description: Login successful
+        401:
+          description: Invalid credentials
+
+  /parkings:
+    get:
+      tags: [Parking]
+      summary: Get all parkings with pagination
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: search
+          schema:
+            type: string
+      responses:
+        200:
+          description: List of parkings
+    post:
+      tags: [Parking]
+      summary: Create new parking (Admin only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Parking'
+      responses:
+        201:
+          description: Parking created
+        403:
+          description: Not authorized
+
+  /parkings/{code}:
+    get:
+      tags: [Parking]
+      summary: Get parking by code
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Parking details
+        404:
+          description: Parking not found
+
+  /entries:
+    get:
+      tags: [Entries]
+      summary: Get all entries with pagination
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: startDate
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: endDate
+          schema:
+            type: string
+            format: date
+      responses:
+        200:
+          description: List of entries
+    post:
+      tags: [Entries]
+      summary: Register car entry (Parking Attendant only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plateNumber:
+                  type: string
+                parkingCode:
+                  type: string
+      responses:
+        201:
+          description: Entry registered
+        400:
+          description: No available spaces
+
+  /entries/exit:
+    post:
+      tags: [Entries]
+      summary: Process car exit (Parking Attendant only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plateNumber:
+                  type: string
+                parkingCode:
+                  type: string
+      responses:
+        200:
+          description: Exit processed with bill
+
+  /entries/reports/outgoing:
+    get:
+      tags: [Reports]
+      summary: Get outgoing cars report (Admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: endDate
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        200:
+          description: Outgoing report with total amount
+
+  /entries/reports/entered:
+    get:
+      tags: [Reports]
+      summary: Get entered cars report (Admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: endDate
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        200:
+          description: Entered cars report
