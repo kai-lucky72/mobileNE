@@ -1,54 +1,64 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-const parkingEntrySchema = new mongoose.Schema({
+const ParkingEntry = sequelize.define('ParkingEntry', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
   plateNumber: {
-    type: String,
-    required: [true, 'Plate number is required'],
-    uppercase: true,
-    trim: true
+    type: DataTypes.STRING,
+    allowNull: false,
+    validate: {
+      notEmpty: true
+    }
   },
   parkingCode: {
-    type: String,
-    ref: 'Parking',
-    required: [true, 'Parking code is required']
+    type: DataTypes.STRING,
+    allowNull: false,
+    references: {
+      model: 'parkings',
+      key: 'code'
+    }
   },
   entryDateTime: {
-    type: Date,
-    default: Date.now
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
   },
   exitDateTime: {
-    type: Date,
-    default: null
+    type: DataTypes.DATE,
+    allowNull: true,
+    defaultValue: null
   },
   chargedAmount: {
-    type: Number,
-    default: 0
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0.00
   },
   ticketNumber: {
-    type: String,
+    type: DataTypes.STRING,
     unique: true
   },
   duration: {
-    type: Number, // in hours
-    default: 0
+    type: DataTypes.FLOAT, // in hours
+    defaultValue: 0
   },
   status: {
-    type: String,
-    enum: ['active', 'completed'],
-    default: 'active'
+    type: DataTypes.ENUM('active', 'completed'),
+    defaultValue: 'active'
   }
 }, {
-  timestamps: true
-});
-
-// Generate ticket number before saving
-parkingEntrySchema.pre('save', function(next) {
-  if (this.isNew && !this.ticketNumber) {
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    this.ticketNumber = `TKT-${timestamp}-${random}`;
+  timestamps: true,
+  tableName: 'parking_entries',
+  hooks: {
+    beforeCreate: (entry) => {
+      if (!entry.ticketNumber) {
+        const timestamp = Date.now().toString(36).toUpperCase();
+        const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+        entry.ticketNumber = `TKT-${timestamp}-${random}`;
+      }
+    }
   }
-  next();
 });
 
-module.exports = mongoose.model('ParkingEntry', parkingEntrySchema);
+module.exports = ParkingEntry;

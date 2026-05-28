@@ -7,7 +7,7 @@ const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
 
-const connectDB = require('./config/database');
+const { connectDB } = require('./config/database');
 const logger = require('./utils/logger');
 
 // Import routes
